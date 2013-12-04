@@ -1,41 +1,38 @@
-module Heroku::Command
-  class Pg < BaseWithApp
+class Heroku::Command::Pg < Heroku::Command::Base
 
-    # pg:upgrade <FOLLOWER>
-    #
-    # unfollow a database and upgrade it to the latest PostgreSQL version
-    #
-    def upgrade
-      name = args.shift
-      follower = hpg_resolve(name)
-      client = hpg_client(follower)
+  # pg:upgrade REPLICA
+  #
+  # unfollow a database and upgrade it to the latest PostgreSQL version
+  #
+  def upgrade
+    unless db = shift_argument
+      error("Usage: heroku pg:upgrade REPLICA\nMust specify REPLICA to upgrade.")
+    end
+    validate_arguments!
 
-      if ['dev', 'basic'].include?follower.plan
-        output_with_bang "#{follower.resource_name} does not support upgrading"
-        return
-      else
-        upgrade_status = hpg_client(follower).upgrade_status
+    resolver = generate_resolver
+    replica = resolver.resolve(db)
+    @app = resolver.app_name if @app.nil?
 
-        if upgrade_status[:error]
-          output_with_bang "There were problems upgrading #{follower.resource_name}"
-          output_with_bang upgrade_status[:error]
-        else
-          follower_db_info = hpg_client(follower).get_database
-          origin_db_url    = follower_db_info[:following]
-          # TODO: should be name not URL
-          origin_name      = origin_db_url
+    replica_info = hpg_info(replica)
 
-          output_with_bang "#{follower.resource_name} will be upgraded to a newer PostgreSQL version,"
-          output_with_bang "stop following #{origin_name}, and become writable."
-          output_with_bang "Use `heroku pg:wait` to track status"
-          output_with_bang "\nThis cannot be undone."
-          return unless confirm_command
+    upgrade_status = hpg_client(replica).upgrade_status
 
-          action "Requesting upgrade" do
-            hpg_client(follower).upgrade
-          end
-        end
+    if upgrade_status[:error]
+      output_with_bang "There were problems upgrading #{replica.resource_name}"
+      output_with_bang upgrade_status[:error]
+    else
+      origin_url = replica_info[:following]
+      origin_name = resolver.database_name_from_url(origin_url)
 
+      output_with_bang "#{replica.resource_name} will be upgraded to a newer PostgreSQL version,"
+      output_with_bang "stop following #{origin_name}, and become writable."
+      output_with_bang "Use `heroku pg:wait` to track status"
+      output_with_bang "\nThis cannot be undone."
+      return unless confirm_command
+
+      action "Requesting upgrade" do
+        hpg_client(replica).upgrade
       end
     end
 
